@@ -2,11 +2,13 @@ import os
 from typing import Literal
 
 from tavily import TavilyClient
-
+from dotenv import load_dotenv
 
 from deepagents import create_deep_agent, SubAgent
+from deepagents.mcp_tools import get_firecrawl_mcp_tools, get_replicate_mcp_tools
  
 # It's best practice to initialize the client once and reuse it.
+load_dotenv()
 tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
 
 # Search tool to use to do research
@@ -158,9 +160,14 @@ You have access to a few tools.
 Use this to run an internet search for a given query. You can specify the number of results, the topic, and whether raw content should be included.
 """
 
+# Resolve MCP tools (Firecrawl + Replicate)
+_mcp_tools = []
+_mcp_tools.extend(get_firecrawl_mcp_tools())
+_mcp_tools.extend(get_replicate_mcp_tools())
+
 # Create the agent
 agent = create_deep_agent(
-    [internet_search],
+    [internet_search] + _mcp_tools,
     research_instructions,
     subagents=[critique_sub_agent, research_sub_agent],
 ).with_config({"recursion_limit": 1000})
