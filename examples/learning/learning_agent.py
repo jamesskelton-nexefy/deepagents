@@ -6,12 +6,9 @@ from dotenv import load_dotenv
 
 from deepagents import create_deep_agent, SubAgent
 from deepagents.mcp_tools import get_all_mcp_tools
-import os
-import requests
  
 # It's best practice to initialize the client once and reuse it.
 # Load environment variables from the project root .env file
-# This ensures UNSTRUCTURED_API_KEY and related vars are available
 load_dotenv(dotenv_path="../../.env")
 tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
 
@@ -75,19 +72,11 @@ critique_sub_agent = {
 
 
 # Prompt prefix to steer the agent to be an expert researcher
-research_instructions = """You are an expert researcher with advanced document processing capabilities. Your job is to conduct thorough research and write a polished report.
+research_instructions = """You are an expert researcher. Your job is to conduct thorough research, and then write a polished report.
 
 The first thing you should do is to write the original user question to `question.txt` so you have a record of it.
 
 Use the research-agent to conduct deep research. It will respond to your questions/topics with a detailed answer.
-
-## Available Tools:
-
-### Core Research Tools:
-1. internet_search - Web search for current information and trends
-2. process_document - Process local documents (PDF, DOCX, PPT, images, etc.) using Unstructured AI to extract structured text, tables, and metadata
-3. research-agent - Delegate specific research topics to specialized sub-agents
-4. critique-agent - Get detailed feedback and suggestions for improving your reports
 
 When you think you enough information to write a final report, write it to `final_report.md`
 
@@ -95,22 +84,6 @@ You can call the critique-agent to get a critique of the final report. After tha
 You can do this however many times you want until are you satisfied with the result.
 
 Only edit the file once at a time (if you call this tool in parallel, there may be conflicts).
-
-### Document Processing Workflow:
-When users provide documents or ask you to analyze files:
-
-1. Extract Document Content: Use process_document(filepath="/absolute/path/to/document") to extract structured content
-2. Analyze Structure: The tool extracts titles, headers, paragraphs, tables, lists, and metadata
-3. Integrate with Research: Combine document insights with web research for comprehensive analysis
-4. Reference Sources: Include both document findings and web sources in your citations
-
-### Supported File Types:
-- Documents: PDF, DOCX, DOC, ODT, RTF, TXT, MD
-- Presentations: PPTX, PPT, ODP
-- Spreadsheets: XLSX, XLS, CSV
-- Images: PNG, JPG, JPEG, TIFF, BMP, SVG
-- Web: HTML, HTM, XML
-- Email: EML
 
 Here are instructions for writing the final report:
 
@@ -192,62 +165,8 @@ Use this to run an internet search for a given query. You can specify the number
 _mcp_tools = get_all_mcp_tools()
 
 # Create the agent
-# Edge Function backed tools
-def search_documents(query: str, context_id: str, top_k: int = 5):
-    """Search processed documents within a context using the rag_search Edge Function.
-
-    Args:
-        query: Natural language query to embed and search.
-        context_id: The context UUID to scope retrieval to.
-        top_k: Maximum number of matches to return (default 5).
-
-    Returns:
-        JSON object with a 'matches' array of chunk hits and metadata.
-    """
-    url = os.environ.get("SUPABASE_URL", "").rstrip("/") + "/functions/v1/rag_search"
-    key = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-    resp = requests.post(url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json={"context_id": context_id, "query": query, "top_k": top_k})
-    resp.raise_for_status()
-    return resp.json()
-
-def retrieve_document(document_id: str = "", context_id: str = "", filename: str = "", version: int | None = None, format: str = "text"):
-    """Retrieve a full document's content or original file via Edge Function.
-
-    Provide either a document_id, or a (context_id, filename[, version]) tuple.
-
-    Args:
-        document_id: The document UUID to fetch (if known).
-        context_id: Context UUID when resolving by filename.
-        filename: Document filename to resolve (used with context_id).
-        version: Optional version number; defaults to latest when omitted.
-        format: One of 'text' (text_content), 'json' (raw_json), or 'original' (signed URL).
-
-    Returns:
-        JSON payload containing the requested representation of the document.
-    """
-    url = os.environ.get("SUPABASE_URL", "").rstrip("/") + "/functions/v1/retrieve_document"
-    key = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-
-    # Validate inputs
-    allowed_formats = {"text", "json", "original"}
-    if format not in allowed_formats:
-        format = "text"
-    if not document_id and not (context_id and filename):
-        raise ValueError("Provide either document_id or (context_id and filename)")
-
-    payload = {"format": format}
-    if document_id:
-        payload.update({"document_id": document_id})
-    else:
-        payload.update({"context_id": context_id, "filename": filename})
-        if version is not None:
-            payload.update({"version": version})
-    resp = requests.post(url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=payload)
-    resp.raise_for_status()
-    return resp.json()
-
 agent = create_deep_agent(
-    [internet_search, search_documents, retrieve_document] + _mcp_tools,
+    [internet_search] + _mcp_tools,
     research_instructions,
     subagents=[critique_sub_agent, research_sub_agent],
 ).with_config({"recursion_limit": 1000})

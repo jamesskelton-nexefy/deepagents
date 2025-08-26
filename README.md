@@ -68,6 +68,21 @@ result = agent.invoke({"messages": [{"role": "user", "content": "what is langgra
 
 See [examples/research/research_agent.py](examples/research/research_agent.py) for a more complex example.
 
+### Unstructured MCP Integration
+
+For document processing (PDF, DOCX, PPTX, images, etc.), follow the guide in `complete_unstructured_integration_guide.md`.
+
+Environment variables expected by the integration (place these in your project root `.env`):
+
+```
+# Unstructured MCP Configuration
+UNSTRUCTURED_API_KEY=your-unstructured-api-key-here
+UNSTRUCTURED_MCP_DIR=C:\\Users\\<you>\\DEV\\deepagents\\mcp-unstructured-server
+UNSTRUCTURED_OUTPUT_DIR=C:\\Users\\<you>\\AppData\\Local\\Temp\\unstructured_output
+```
+
+On Windows, ensure the paths are absolute. The project uses a root `.venv` as its virtual environment; activate it before running examples.
+
 The agent created with `create_deep_agent` is just a LangGraph graph - so you can interact with it (streaming, human-in-the-loop, memory, studio)
 in the same way you would any LangGraph agent.
 
@@ -262,28 +277,101 @@ agent = create_deep_agent(
 
 When a tool call requires approval, the agent will pause and wait for human input before proceeding. The message shown to users will include your custom prefix (or "Tool execution requires approval" by default) followed by the tool name and arguments. Multiple tool calls are processed in parallel, allowing you to review and approve multiple operations at once.
 
-## MCP
+## MCP Integration
 
-The `deepagents` library can be ran with MCP tools. This can be achieved by using the [Langchain MCP Adapter library](https://github.com/langchain-ai/langchain-mcp-adapters).
+The `deepagents` library includes built-in support for MCP (Model Context Protocol) tools using the [LangChain MCP Adapter library](https://github.com/langchain-ai/langchain-mcp-adapters). This allows you to easily connect to MCP servers like Firecrawl for web scraping and Microsoft Learn for documentation processing.
 
-(To run the example below, will need to `pip install langchain-mcp-adapters`)
+### Installation
+
+```bash
+pip install langchain-mcp-adapters
+```
+
+### Built-in MCP Support
+
+The library provides convenient functions to connect to MCP servers:
+
+```python
+from deepagents.mcp_tools import get_firecrawl_mcp_tools, get_microsoft_learn_mcp_tools, get_all_mcp_tools
+
+# Get individual tool sets
+firecrawl_tools = get_firecrawl_mcp_tools()  # Web scraping (auto-starts with langgraph dev)
+learn_tools = get_microsoft_learn_mcp_tools()  # Microsoft Learn content & docs
+
+# Or get all tools at once (recommended)
+all_tools = get_all_mcp_tools()
+```
+
+### Environment Variables
+
+Configure your MCP servers using environment variables:
+
+```bash
+# Firecrawl MCP (automatically starts with langgraph dev)
+FIRECRAWL_API_KEY=your-firecrawl-api-key
+FIRECRAWL_MCP_COMMAND=npx
+FIRECRAWL_MCP_ARGS=-y firecrawl-mcp
+```
+
+### How It Works
+
+When you run `langgraph dev`, the system connects to both MCP servers:
+
+**Firecrawl MCP (Local STDIO):**
+- **Automatic startup**: No manual server management required
+- **Reliable connection**: Uses subprocess management 
+- **10+ tools**: Web scraping, crawling, and content extraction
+
+**Microsoft Learn MCP (Remote HTTP):**
+- **Public server**: Connects to [Microsoft's Learn MCP endpoint](https://learn.microsoft.com/en-us/training/support/mcp)
+- **No authentication**: Publicly available, no API key required
+- **Documentation tools**: Search and process Microsoft Learn content for markdown conversion
+
+### Custom MCP Client
+
+For additional MCP servers, create your own client:
 
 ```python
 import asyncio
+import os
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from deepagents import create_deep_agent
 
 async def main():
-    # Collect MCP tools
-    mcp_client = MultiServerMCPClient(...)
-    mcp_tools = await mcp_client.get_tools()
+    # Configure multiple MCP servers via STDIO
+    client = MultiServerMCPClient({
+        "firecrawl": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "firecrawl-mcp"],
+            "env": {
+                "FIRECRAWL_API_KEY": "your-firecrawl-api-key",
+                "PATH": os.environ.get("PATH", "")
+            }
+        },
+        "replicate": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "replicate-mcp"], 
+            "env": {
+                "REPLICATE_API_TOKEN": "your-replicate-token",
+                "PATH": os.environ.get("PATH", "")
+            }
+        }
+    })
+    
+    # Get all tools from all servers
+    mcp_tools = await client.get_tools()
 
-    # Create agent
-    agent = create_deep_agent(tools=mcp_tools, ....)
+    # Create agent with MCP tools
+    agent = create_deep_agent(
+        tools=mcp_tools,
+        instructions="You are a helpful assistant with access to web scraping and AI generation tools."
+    )
 
-    # Stream the agent
+    # Use the agent
     async for chunk in agent.astream(
-        {"messages": [{"role": "user", "content": "what is langgraph?"}]},
+        {"messages": [{"role": "user", "content": "Scrape https://example.com and summarize it"}]},
         stream_mode="values"
     ):
         if "messages" in chunk:
