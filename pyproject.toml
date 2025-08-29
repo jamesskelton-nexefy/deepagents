@@ -11,6 +11,11 @@ dependencies = [
     "langchain>=0.2.14",
     "anthropic>=0.36.0",
     "pypandoc>=1.13",
+    "tavily-python",
+    "python-dotenv",
+    "langchain-mcp",
+    "langchain-mcp-adapters",
+    "requests",
 ]
 
 
