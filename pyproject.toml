@@ -16,6 +16,7 @@ dependencies = [
     "langchain-mcp",
     "langchain-mcp-adapters",
     "requests",
+    "supabase",
 ]
 
 
