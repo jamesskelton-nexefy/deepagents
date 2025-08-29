@@ -556,6 +556,60 @@ async def search_documents(ctx: Context, query: str, top_k: int = 5) -> str:
         return f"Search error: {e}"
 
 
+@mcp.tool()
+async def list_documents(ctx: Context, context_id: Optional[str] = None, limit: int = 50, offset: int = 0) -> str:
+    """List all documents in a context with metadata.
+    
+    Args:
+        context_id: The context UUID to filter documents by (optional - will use thread_id if not provided)
+        limit: Maximum number of documents to return (default 50)
+        offset: Number of documents to skip for pagination (default 0)
+        
+    Returns:
+        JSON string containing list of documents with metadata
+    """
+    supabase_client = ctx.request_context.lifespan_context.supabase
+    if supabase_client is None:
+        return "Supabase is not configured."
+    
+    # If no context_id provided, we can't list documents without knowing the context
+    if not context_id:
+        return json.dumps({
+            "error": "context_id is required to list documents. Please provide the current conversation context ID.",
+            "success": False
+        })
+    
+    try:
+        resp = await asyncio.to_thread(
+            lambda: supabase_client.table("da_documents")
+                .select("id,filename,version,size_bytes,mime_type,source_mtime,source_path")
+                .eq("context_id", context_id)
+                .order("filename", desc=False)
+                .order("version", desc=True)  # Latest version first for same filename
+                .limit(limit)
+                .offset(offset)
+                .execute()
+        )
+        
+        documents = resp.data or []
+        result = {
+            "success": True,
+            "context_id": context_id,
+            "documents": documents,
+            "count": len(documents),
+            "limit": limit,
+            "offset": offset
+        }
+        return json.dumps(result, indent=2)
+        
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": f"List documents error: {e}",
+            "context_id": context_id
+        })
+
+
 async def _download_to_temp(supabase_client: Client, bucket: str, object_path: str, filename: str) -> str:
     # Download bytes and write to a temp path
     data = await asyncio.to_thread(lambda: supabase_client.storage.from_(bucket).download(object_path))

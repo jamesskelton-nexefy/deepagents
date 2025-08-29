@@ -59,7 +59,13 @@ def create_deep_agent(
         checkpointer: Optional checkpointer for persisting agent state between runs.
     """
     
+    # Build prompt as a string. Note: LangGraph's create_react_agent doesn't support
+    # Anthropic content blocks, so we concatenate for now and rely on model-level
+    # caching if needed.
     prompt = instructions + base_prompt
+    
+    # TODO: Implement custom agent creation to support Anthropic content blocks
+    # when enable_prompt_caching is True
     built_in_tools = [write_todos, write_file, read_file, ls, edit_file]
     if model is None:
         model = get_default_model()

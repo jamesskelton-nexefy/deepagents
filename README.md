@@ -1,5 +1,7 @@
 # 🧠🤖Deep Agents
 
+langgraph dev --allow-blocking
+
 Using an LLM to call tools in a loop is the simplest form of an agent. 
 This architecture, however, can yield agents that are “shallow” and fail to plan and act over longer, more complex tasks. 
 Applications like “Deep Research”, "Manus", and “Claude Code” have gotten around this limitation by implementing a combination of four things:
@@ -85,6 +87,72 @@ On Windows, ensure the paths are absolute. The project uses a root `.venv` as it
 
 The agent created with `create_deep_agent` is just a LangGraph graph - so you can interact with it (streaming, human-in-the-loop, memory, studio)
 in the same way you would any LangGraph agent.
+
+### Anthropic 1M Context (Claude Sonnet 4)
+
+Organizations on Anthropic usage tier 4 (or with custom limits) can enable the 1M token context window for Claude Sonnet 4. This repository supports an opt-in toggle that adds the required beta header automatically.
+
+Environment variables (place in project root `.env`):
+
+```
+# Enable 1M context (optional; defaults to off)
+DEEPAGENTS_ENABLE_1M_CONTEXT=true
+
+# Optional: increase request timeout for very large prompts (seconds)
+DEEPAGENTS_REQUEST_TIMEOUT_SECONDS=300
+
+# Anthropic credentials
+ANTHROPIC_API_KEY=your-anthropic-key
+```
+
+Details:
+- When `DEEPAGENTS_ENABLE_1M_CONTEXT` is true, the library sends `anthropic-beta: context-1m-2025-08-07` on all Anthropic requests.
+- Default model remains `claude-sonnet-4-20250514` via `ChatAnthropic`.
+- Long-context requests over 200K tokens incur premium pricing and have separate rate limits. Plan prompts accordingly and consider chunked RAG for cost/latency.
+
+Note: You can keep this disabled by default and enable it only for workflows that truly benefit from very large prompts.
+
+### Markdown → DOCX conversion and download
+
+The library provides a backend tool to convert agent-created Markdown files to DOCX and return a signed download URL via Supabase Storage.
+
+- Tool: `convert_and_download_docx`
+- Storage bucket: `generated-exports` (private)
+- Tracking table: `public.da_generated_exports`
+
+Setup:
+- Ensure environment variables in your project root `.env`:
+
+```
+SUPABASE_URL=...        # Your Supabase project URL
+SUPABASE_SERVICE_ROLE_KEY=...  # Service role key for server-side upload/sign
+```
+
+Usage example (inside an agent run with VFS):
+
+```python
+from deepagents.tools import convert_and_download_docx
+
+# state contains a VFS and a contextId
+state = {
+  "files": {"/work/learning_content.md": "# Title\n\nSome text..."},
+  "contextId": "<uuid>"
+}
+
+result_json = convert_and_download_docx(
+  state=state,
+  vfs_md_path="/work/learning_content.md",
+  approved_docx_filename="learning_content.docx",
+  include_toc=True,  # optional
+  reference_docx_path=None,  # optional path to a style template
+)
+# Returns JSON: { success, bucket, object_path, filename, size_bytes, signed_url, expires_in }
+```
+
+Notes:
+- Conversion uses Pandoc via `pypandoc` and will attempt to download the Pandoc binary if missing.
+- Images referenced by relative paths can be resolved by passing `resource_paths=["/work"]`.
+- Signed URLs expire (default 1 hour). Generate a new link if needed.
 
 ## Creating a custom deep agent
 
@@ -214,7 +282,7 @@ This tool doesn't actually do anything - it is just a way for the agent to come 
 
 ### File System Tools
 
-`deepagents` comes with four built-in file system tools: `ls`, `edit_file`, `read_file`, `write_file`.
+`deepagents` comes with five built-in file system tools: `ls`, `edit_file`, `read_file`, `write_file`, `delete_file`.
 These do not actually use a file system - rather, they mock out a file system using LangGraph's State object.
 This means you can easily run many of these agents on the same machine without worrying that they will edit the same underlying files.
 
@@ -379,6 +447,74 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Prompt Caching (Anthropic) and Node Caching (LangGraph)
+
+`deepagents` supports Anthropic prompt caching strategies and LangGraph node-level caching to reduce latency and costs for repeated content.
+
+### Anthropic prompt caching helpers
+
+Use helpers in `deepagents/anthropic_cache.py` to mark cache breakpoints:
+
+```python
+from deepagents.anthropic_cache import (
+    add_cache_control_to_tools,
+    build_cached_system_blocks,
+    build_cached_message_blocks,
+)
+
+# 1) Cache all tools with a 1-hour TTL (mark last tool)
+tools_with_cache = add_cache_control_to_tools(tools, ttl="1h")
+
+# 2) Cache system instructions + base prompt with a 1-hour TTL
+system_blocks = build_cached_system_blocks(instructions, base_prompt_text, ttl="1h")
+
+# 3) Cache large RAG bundle and the final user block with a 5-minute TTL
+rag_context_text = "... large document excerpts ..."
+final_question = "Please analyze ..."
+user_content_blocks = build_cached_message_blocks([rag_context_text, final_question], ttl="5m")
+
+# Assemble request for Anthropic Messages API
+payload = {
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 1024,
+    "tools": tools_with_cache,
+    "system": system_blocks,
+    "messages": [
+        {"role": "user", "content": user_content_blocks}
+    ],
+}
+```
+
+Breakpoint order should follow Anthropic’s prefix order: tools → system → messages. Ensure cacheable segments meet model minimums (≥1024 tokens for Sonnet/Opus; ≥2048 for Haiku).
+
+Recommended TTLs:
+- Tools & System: `1h`
+- RAG bundles & Conversation tail: `5m`
+
+#### Learning example: make cached user messages with RAG bundles
+
+In the learning example, use the convenience function to build a cache-marked user turn that includes large RAG context plus a question:
+
+```python
+from examples.learning.learning_agent import make_cached_user_message, agent
+
+rag_texts = ["...long doc excerpt 1...", "...long doc excerpt 2..."]
+user_msg = make_cached_user_message(rag_texts, "Summarize the key differences", ttl="5m")
+
+result = agent.invoke({
+    "messages": [user_msg],
+})
+```
+
+### LangGraph node-level caching
+
+For deterministic nodes that call Supabase-backed endpoints, use short TTL caches (30–120s) keyed by inputs (e.g., `context_id`, `query`, pagination). The built-in RAG tool functions (`list_documents_with_context`, `search_documents_with_context`) include lightweight TTL caches to avoid duplicate calls across rapid successive turns.
+
+Notes:
+- Keep tool schema ordering stable within a session to avoid invalidating tool-level cache.
+- Avoid toggling images or thinking settings mid-session when depending on message-level cache.
+- Add additional breakpoints if you exceed ~20 blocks before your final breakpoint.
 
 ## Roadmap
 - [ ] Allow users to customize full system prompt

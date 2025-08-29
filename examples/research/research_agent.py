@@ -86,8 +86,14 @@ Use the research-agent to conduct deep research. It will respond to your questio
 ### Core Research Tools:
 1. internet_search - Web search for current information and trends
 2. process_document - Process local documents (PDF, DOCX, PPT, images, etc.) using Unstructured AI to extract structured text, tables, and metadata
-3. research-agent - Delegate specific research topics to specialized sub-agents
-4. critique-agent - Get detailed feedback and suggestions for improving your reports
+3. list_documents_with_context - List all documents in the current conversation context
+4. search_documents_with_context - Search through processed documents using semantic search within the current context
+5. retrieve_document - Retrieve full content of a specific document by ID or filename (requires context_id parameter)
+6. process_agent_document - Process approved VFS documents through Supabase ingest pipeline to make them searchable
+
+**Important**: The document tools (list_documents_with_context, search_documents_with_context, process_agent_document) automatically use the contextId from the conversation state. The retrieve_document tool still requires an explicit context_id parameter.
+7. research-agent - Delegate specific research topics to specialized sub-agents
+8. critique-agent - Get detailed feedback and suggestions for improving your reports
 
 When you think you enough information to write a final report, write it to `final_report.md`
 
@@ -99,10 +105,14 @@ Only edit the file once at a time (if you call this tool in parallel, there may 
 ### Document Processing Workflow:
 When users provide documents or ask you to analyze files:
 
-1. Extract Document Content: Use process_document(filepath="/absolute/path/to/document") to extract structured content
-2. Analyze Structure: The tool extracts titles, headers, paragraphs, tables, lists, and metadata
-3. Integrate with Research: Combine document insights with web research for comprehensive analysis
-4. Reference Sources: Include both document findings and web sources in your citations
+1. List Available Documents: Use list_documents_with_context() to see what documents are already processed in the current conversation context.
+2. Extract Document Content: Use process_document(filepath="/absolute/path/to/document") to extract structured content
+3. Search Documents: Use search_documents_with_context(query="your query") for semantic search through processed documents in the current context
+4. Retrieve Documents: Use retrieve_document(document_id="doc-id" or filename="file.pdf", context_id="your-context-id") to get full document content
+5. Process Agent Documents: Use process_agent_document(vfs_file_path="/path/to/file", approved_filename="report.md") to process approved VFS documents so they become searchable within the conversation context
+6. Analyze Structure: The tools extract titles, headers, paragraphs, tables, lists, and metadata
+7. Integrate with Research: Combine document insights with web research for comprehensive analysis
+8. Reference Sources: Include both document findings and web sources in your citations
 
 ### Supported File Types:
 - Documents: PDF, DOCX, DOC, ODT, RTF, TXT, MD
@@ -188,8 +198,16 @@ You have access to a few tools.
 Use this to run an internet search for a given query. You can specify the number of results, the topic, and whether raw content should be included.
 """
 
-# Load all MCP tools (Firecrawl + Microsoft Learn)
+# Load all MCP tools (Firecrawl + Microsoft Learn + Unstructured)
 _mcp_tools = get_all_mcp_tools()
+
+# Import consolidated document tools
+from deepagents.tools import (
+    list_documents_with_context,
+    search_documents_with_context,
+    process_agent_document,
+    retrieve_document
+)
 
 # Create the agent
 # Edge Function backed tools
@@ -246,8 +264,15 @@ def retrieve_document(document_id: str = "", context_id: str = "", filename: str
     resp.raise_for_status()
     return resp.json()
 
+# Create the agent with consolidated tools
 agent = create_deep_agent(
-    [internet_search, search_documents, retrieve_document] + _mcp_tools,
+    [
+        internet_search, 
+        search_documents_with_context,  # Use context-aware version
+        retrieve_document,  # Keep original (it already takes context_id)
+        list_documents_with_context,    # Use context-aware version
+        process_agent_document          # Process approved VFS documents
+    ] + _mcp_tools,
     research_instructions,
     subagents=[critique_sub_agent, research_sub_agent],
 ).with_config({"recursion_limit": 1000})

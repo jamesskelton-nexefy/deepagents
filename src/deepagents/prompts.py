@@ -275,3 +275,11 @@ Usage:
 - Results are returned using cat -n format, with line numbers starting at 1
 - You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful. 
 - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents."""
+
+DELETE_DESCRIPTION = """Delete a file from the virtual file system.
+
+Usage:
+- Permanently removes the specified file from the VFS
+- The file must exist in the VFS to be deleted
+- Returns an error if the file doesn't exist
+- Use with caution as deletion is permanent within the VFS session"""
