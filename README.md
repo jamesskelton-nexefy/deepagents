@@ -398,6 +398,61 @@ agent = create_deep_agent(
 
 See the [research agent example](examples/research/research_agent.py) for a complete implementation with RAG capabilities.
 
+### Keeping a private customization in sync with upstream
+
+If you customize this repo locally but still want to pull updates from the original repository, use this workflow.
+
+One-time setup (safe backup of your changes):
+
+```bash
+# 1) Put your work on a dedicated branch
+git switch -c james/custom
+git add -A && git commit -m "WIP: my customizations"
+
+# 2) Track the original repo as `upstream`
+git remote rename origin upstream
+
+# 3) (Optional) Add your private remote as `origin` to back up your branch
+# Replace <your-url> with your private fork/repo URL
+git remote add origin <your-url>
+git push -u origin james/custom
+```
+
+Pull latest upstream changes and integrate into your custom branch:
+
+```bash
+# Update local master from upstream
+git fetch upstream
+git switch master
+git rebase upstream/master   # or: git merge upstream/master
+
+# Bring those updates into your custom branch
+git switch james/custom
+
+# Option A (clean history, may need conflict resolution):
+git rebase master
+
+# Option B (keep your changes when conflicts arise):
+git merge master -X ours --no-edit
+
+# Push your updated branch (if you set a private origin)
+git push
+```
+
+Quickly pull the latest upstream master without touching your custom branch:
+
+```bash
+git fetch upstream
+git switch master
+git rebase upstream/master   # or: git merge upstream/master
+```
+
+Notes:
+- If you see conflicts during rebase/merge you can abort and choose the other option:
+  - Abort rebase: `git rebase --abort`
+  - Retry with the merge strategy above: `git merge master -X ours --no-edit`
+- If `frontend` is a submodule, initialize after pulling: `git submodule update --init --recursive`.
+
 ### Human-in-the-Loop
 
 `deepagents` supports human-in-the-loop approval for tool execution. You can configure specific tools to require human approval before execution using the `tool_configs` parameter, which maps tool names to a `HumanInTheLoopConfig`.
