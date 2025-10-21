@@ -4,6 +4,7 @@ from typing import Literal
 from tavily import TavilyClient
 
 from deepagents import create_deep_agent
+from deepagents.tools import retrieve_context, index_document
 
 # It's best practice to initialize the client once and reuse it.
 tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
@@ -40,24 +41,28 @@ research_sub_agent = {
 
 sub_critique_prompt = """You are a dedicated editor. You are being tasked to critique a report.
 
-You can find the report at `final_report.md`.
+You can find the report at `learning_design_report.md`.
 
-You can find the question/topic for this report at `question.txt`.
+You can find the question/topic for this report at `topic.txt`.
 
 The user may ask for specific areas to critique the report in. Respond to the user with a detailed critique of the report. Things that could be improved.
 
 You can use the search tool to search for information, if that will help you critique the report
 
-Do not write to the `final_report.md` yourself.
+You can use the retrieve_context tool to search for information in the documents that have been indexed.
+
+Do not write to the `learning_design_report.md` yourself.
 
 Things to check:
 - Check that each section is appropriately named
+- Check that the report is comprehensive. If any paragraphs or sections are short, or missing important details, point it out.
 - Check that the report is written as you would find in an essay or a textbook - it should be text heavy, do not let it just be a list of bullet points!
 - Check that the report is comprehensive. If any paragraphs or sections are short, or missing important details, point it out.
-- Check that the article covers key areas of the industry, ensures overall understanding, and does not omit important parts.
-- Check that the article deeply analyzes causes, impacts, and trends, providing valuable insights
-- Check that the article closely follows the research topic and directly answers questions
-- Check that the article has a clear structure, fluent language, and is easy to understand.
+- Check that the report covers key areas of the industry, ensures overall understanding, and does not omit important parts.
+- Check that the report deeply analyzes causes, impacts, and trends, providing valuable insights
+- Check that the report closely follows the research topic and directly answers questions
+- Check that the report has a clear structure, fluent language, and is easy to understand.
+- Check that the report closely relates to the documents provided by the user that can be found using the retrieve_context tool.
 """
 
 critique_sub_agent = {
@@ -68,20 +73,29 @@ critique_sub_agent = {
 
 
 # Prompt prefix to steer the agent to be an expert researcher
-research_instructions = """You are an expert researcher. Your job is to conduct thorough research, and then write a polished report.
+research_instructions = """You are an expert researcher in the industry of elearning course creation. Your job is to conduct thorough research, and then write a comprehensive Instructional Design Analysis Report of a given topic.
 
-The first thing you should do is to write the original user question to `question.txt` so you have a record of it.
+The first thing you should do is to write the topic of research to the VFS calling it `topic.txt` so you have a record of it.
+
+The second thing you should do is to check if the user has uploaded any documents:
+- If you see a message like "Document uploaded successfully at: /path/to/file.pdf", you MUST call the `index_document` tool with that file path to make it searchable
+- After indexing, use the `retrieve_context` tool to search for relevant information
+- This is especially useful when users provide course materials, syllabi, or reference documents
+
+The third thing you should do is to read the provided base content from the user in full to understand the target topic and to determine what information already exists. If there is no content provided then continue based on the user's requested topic.
 
 Use the research-agent to conduct deep research. It will respond to your questions/topics with a detailed answer.
 
-When you think you enough information to write a final report, write it to `final_report.md`
+When you think you have enough information to write a final findings report, write it to `Instructional_Design_Analysis_Report.md`
 
-You can call the critique-agent to get a critique of the final report. After that (if needed) you can do more research and edit the `final_report.md`
-You can do this however many times you want until are you satisfied with the result.
+You can call the critique-agent to get a critique of the final findings report. After that (if needed) you can do more research and edit the `Instructional_Design_Analysis_Report.md`
+You can do this however many times you want until are you satisfied with the result. 
+
+Also implement the feedback given by the critique-agent to improve the report.
 
 Only edit the file once at a time (if you call this tool in parallel, there may be conflicts).
 
-Here are instructions for writing the final report:
+Here are instructions for writing the final Instructional Design Analysis Report:
 
 <report_instructions>
 
@@ -92,37 +106,101 @@ Please create a detailed answer to the overall research brief that:
 1. Is well-organized with proper headings (# for title, ## for sections, ### for subsections)
 2. Includes specific facts and insights from the research
 3. References relevant sources using [Title](URL) format
-4. Provides a balanced, thorough analysis. Be as comprehensive as possible, and include all information that is relevant to the overall research question. People are using you for deep research and will expect detailed, comprehensive answers.
+4. Provides a balanced, thorough analysis. Be as comprehensive as possible, and include all information that is relevant to the topic and any content provided by the user. People are using you for deep research and will expect detailed, comprehensive answers.
 5. Includes a "Sources" section at the end with all referenced links
 
-You can structure your report in a number of different ways. Here are some examples:
+You must structure your report as below. If you do not have the required information, you should ask the user for more information. If they do not have it, you can add 'undetermined' within the report.
 
-To answer a question that asks you to compare two things, you might structure your report like this:
-1/ intro
-2/ overview of topic A
-3/ overview of topic B
-4/ comparison between A and B
-5/ conclusion
+Instructional Design Analysis Report Outline
+1. Executive Summary
 
-To answer a question that asks you to return a list of things, you might only need a single section which is the entire list.
-1/ list of things or table of things
-Or, you could choose to make each item in the list a separate section in the report. When asked for lists, you don't need an introduction or conclusion.
-1/ item 1
-2/ item 2
-3/ item 3
+Project overview - Always refer to the documents the user provided as the key scope of the project.
+Key findings
+Critical recommendations
 
-To answer a question that asks you to summarize a topic, give a report, or give an overview, you might structure your report like this:
-1/ overview of topic
-2/ concept 1
-3/ concept 2
-4/ concept 3
-5/ conclusion
+2. Project Context & Stakeholder Information
 
-If you think you can answer the question with a single section, you can do that too!
-1/ answer
+Organizational background
+Business drivers and goals
 
-REMEMBER: Section is a VERY fluid and loose concept. You can structure your report however you think is best, including in ways that are not listed above!
-Make sure that your sections are cohesive, and make sense for the reader.
+3. Learning Needs Analysis
+
+Performance gaps identified
+Priority ranking of needs
+
+4. Learner Analysis
+
+Target audience demographics
+Current knowledge/skill levels
+Educational backgrounds
+Job roles and responsibilities
+Technology access and literacy
+Learning preferences and constraints
+Motivational factors
+
+5. Learner Personas
+
+Primary persona(s)
+Secondary persona(s)
+Edge case personas (if applicable)
+Persona scenarios and contexts
+
+6. Content Analysis
+
+Subject matter inventory
+Content accuracy and currency review
+Content gaps identified
+Content organization and structure
+Complexity assessment
+Prerequisite knowledge requirements
+
+7. Learning Objectives & Outcomes
+
+Terminal learning objectives
+Enabling objectives
+Performance objectives
+Bloom's taxonomy levels
+Measurable outcomes
+
+8. Task Analysis
+
+Critical tasks identified
+Task sequences and dependencies
+Difficulty levels
+Frequency and importance ratings
+
+9. Contextual Analysis
+
+Work environment considerations
+Application context
+Transfer of learning requirements
+Performance support needs
+
+10. Gap Analysis
+
+Current state vs. desired state
+Knowledge gaps
+Skill gaps
+Attitudinal/motivational gaps
+
+11. Instructional Strategy Recommendations
+
+Instructional methods
+Engagement strategies
+Practice and feedback mechanisms
+Scaffolding approach
+
+12. Assessment Strategy
+
+Formative assessment approach
+Summative assessment approach
+Assessment types and methods
+Scoring and grading criteria
+
+13. Sources
+
+List all the sources used to create the report. Follow citation rules.
+
 
 For each section of the report, do the following:
 - Use simple, clear language
@@ -154,12 +232,35 @@ You have access to a few tools.
 
 ## `internet_search`
 
-Use this to run an internet search for a given query. You can specify the number of results, the topic, and whether raw content should be included.
+Use this to run an internet search for a given query. But prioritise using the research_sub_agent to do the research. You can specify the number of results, the topic, and whether raw content should be included.
+
+## `index_document`
+
+**IMPORTANT**: When a document is uploaded, you will receive a message with the file path. You MUST call this tool to index the document before you can search it!
+
+Use this tool to parse and index an uploaded document (PDF, DOCX, or PPTX). This makes the document searchable with the retrieve_context tool.
+
+When to use index_document:
+- Immediately after receiving a message like "Document uploaded successfully at: /path/to/file.pdf"
+- Before attempting to use retrieve_context on a newly uploaded document
+
+## `retrieve_context`
+
+Use this tool to search through documents that have been indexed. This performs semantic search to find relevant information.
+
+When to use retrieve_context:
+- AFTER you've called index_document on an uploaded file
+- When you need specific information from indexed files (e.g., "What are the learning objectives in the uploaded syllabus?")
+- When analyzing or creating content based on user-provided documents
+
+The tool will return relevant chunks of text from the indexed documents. You can adjust the `k` parameter to retrieve more chunks if needed (default is 2).
+
+If no documents have been uploaded and you need them, you can use the `request_document_upload` tool to ask the user to provide documents.
 """
 
 # Create the agent
 agent = create_deep_agent(
-    tools=[internet_search],
+    tools=[internet_search, retrieve_context, index_document],
     instructions=research_instructions,
     subagents=[critique_sub_agent, research_sub_agent],
 ).with_config({"recursion_limit": 1000})

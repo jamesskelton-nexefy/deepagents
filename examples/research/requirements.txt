@@ -1,3 +1,13 @@
 -e ../../
 langgraph-cli[inmem]
 tavily-python
+docling
+python-magic-bin
+supabase
+langchain-openai
+langchain-text-splitters
+langchain-community
+pypdf
+docx2txt
+unstructured[pptx]
+chromadb

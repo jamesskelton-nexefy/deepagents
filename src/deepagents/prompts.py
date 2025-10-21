@@ -361,6 +361,95 @@ Usage:
 - The write_file tool will create the a new file.
 - Prefer to edit existing files over creating new ones when possible."""
 
+REQUEST_DOCUMENT_UPLOAD_TOOL_DESCRIPTION = """Request the user to upload a document (PDF, DOCX, or PPTX) for analysis.
+
+This tool displays an upload interface to the user. After upload, you'll receive the file path and should use the index_document tool to make it searchable.
+
+**When to use this tool:**
+- When you need the user to provide a document
+- When the user mentions they have a document but haven't uploaded it yet
+- When you need source material for research or analysis
+
+**Parameters:**
+- prompt: A clear message explaining what document you need (e.g., "Please upload the course syllabus PDF")
+- accepted_formats: List of acceptable formats (defaults to ["pdf", "docx", "pptx"])
+
+**After the user uploads:**
+1. You'll receive a message like: "Document uploaded successfully at: /path/to/file.pdf"
+2. **IMPORTANT**: You must call index_document(file_path="/path/to/file.pdf") to index it
+3. Then you can use retrieve_context to search the document
+
+**Example workflow:**
+```
+You: request_document_upload(prompt="Please upload the training manual")
+System: Document uploaded successfully at: /tmp/manual.pdf
+You: index_document(file_path="/tmp/manual.pdf")
+System: Successfully indexed document with 20 chunks
+You: retrieve_context(query="What are the training requirements?")
+```"""
+
+INDEX_DOCUMENT_TOOL_DESCRIPTION = """Index an uploaded document for semantic search retrieval.
+
+This tool takes a file path to an uploaded document (PDF, DOCX, or PPTX) and:
+1. Loads and parses the document
+2. Chunks it into searchable segments
+3. Indexes it in the vector store for this conversation thread
+4. Makes it available for the retrieve_context tool
+
+**When to use this tool:**
+- Immediately after a user uploads a document
+- When you receive a file path from the document upload system
+- Before using retrieve_context on newly uploaded files
+
+**Parameters:**
+- file_path: The absolute path to the uploaded file (you'll receive this from the upload system)
+
+**What happens:**
+- Document is parsed and chunked
+- Chunks are indexed in the vector store (in-memory, persists for this session)
+- Full text is saved to VFS for reference
+- You can then use retrieve_context to search the document
+
+**Example:**
+After document upload, you'll be told: "Document uploaded at: /tmp/xyz.pdf"
+You should call: index_document(file_path="/tmp/xyz.pdf")
+Then you can use: retrieve_context(query="What is this about?")
+"""
+
+RETRIEVE_CONTEXT_TOOL_DESCRIPTION = """Retrieve relevant information from uploaded documents using semantic search.
+
+This tool performs semantic search over documents that have been uploaded in the current conversation thread.
+It uses embeddings to find the most relevant chunks of text based on your query.
+
+When to use this tool:
+- When you need to find specific information in uploaded documents
+- When answering questions that require context from user-provided documents
+- When the user asks about content in their uploaded files
+- When you need targeted information rather than reading the entire document
+
+When NOT to use this tool:
+- If no documents have been uploaded (use request_document_upload first)
+- If you need to read the entire document structure (use read_file on the markdown instead)
+- For general knowledge questions not related to uploaded documents
+
+How it works:
+- Searches through chunked document content using semantic similarity
+- Returns the most relevant chunks (default: 2 chunks)
+- Each chunk includes source metadata and content
+- Works only within the current conversation thread (documents are isolated per thread)
+
+Parameters:
+- query: Your search query describing what information you're looking for
+- k: Number of relevant chunks to retrieve (default: 2, increase for broader context)
+
+Example usage:
+retrieve_context(
+    query="What are the learning objectives mentioned in the syllabus?",
+    k=3
+)
+
+The tool returns formatted context with source metadata that you can use to answer user questions."""
+
 WRITE_TODOS_SYSTEM_PROMPT = """## `write_todos`
 
 You have access to the `write_todos` tool to help you manage and plan complex objectives. 

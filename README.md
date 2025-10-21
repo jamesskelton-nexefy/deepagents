@@ -1,4 +1,5 @@
 # 🧠🤖Deep Agents
+../../venv/Scripts/Activate.ps1
 
 Using an LLM to call tools in a loop is the simplest form of an agent. 
 This architecture, however, can yield agents that are “shallow” and fail to plan and act over longer, more complex tasks. 
@@ -69,6 +70,68 @@ See [examples/research/research_agent.py](examples/research/research_agent.py) f
 
 The agent created with `create_deep_agent` is just a LangGraph graph - so you can interact with it (streaming, human-in-the-loop, memory, studio)
 in the same way you would any LangGraph agent.
+
+## Streaming Chain of Thought
+
+Deep agents support real-time chain of thought streaming, allowing you to observe the reasoning process of both the main agent and sub-agents as they work. This feature uses LangGraph's standard streaming modes plus custom events for sub-agent context.
+
+### Stream Modes
+
+To enable chain of thought streaming, use multiple stream modes:
+
+```python
+async for chunk in agent.astream(
+    {"messages": [{"role": "user", "content": "Research deep learning"}]},
+    stream_mode=["updates", "messages", "custom"]
+):
+    # Handle different event types
+    pass
+```
+
+**Stream modes:**
+- `updates`: State changes (todos, files) - shows what the agent is doing
+- `messages`: LLM tokens with `langgraph_node` metadata - captures reasoning
+- `custom`: Sub-agent wrapper events - provides context about which sub-agent is running
+
+### Main Agent Reasoning
+
+The main agent's chain of thought is automatically available through the standard `messages` stream mode. Each token includes metadata with `langgraph_node` to identify the source:
+
+```python
+async for chunk in agent.astream(input, stream_mode=["messages"]):
+    message, metadata = chunk
+    if message.content and metadata.get("langgraph_node") == "agent":
+        print(f"Main agent thinking: {message.content}")
+```
+
+### Sub-Agent Reasoning
+
+When a sub-agent is invoked, the `task` tool emits custom events to provide context:
+
+1. `subagent_start` - Emitted when sub-agent begins
+2. `subagent_messages` - Forwards LLM tokens from the sub-agent
+3. `subagent_updates` - Forwards state updates from the sub-agent
+4. `subagent_end` - Emitted when sub-agent completes
+
+```python
+async for chunk in agent.astream(input, stream_mode=["custom"]):
+    if chunk.get("type") == "subagent_start":
+        print(f"Sub-agent {chunk['subagent']} starting: {chunk['task']}")
+    elif chunk.get("type") == "subagent_messages":
+        # Token from sub-agent's reasoning
+        message_chunk, metadata = chunk["data"]
+        print(f"Sub-agent thinking: {message_chunk.content}")
+```
+
+### Frontend Integration
+
+The frontend automatically displays thinking blocks in a Perplexity-style collapsible UI:
+- Main agent thinking appears first with expandable/collapsible sections
+- Sub-agent thinking appears nested/indented under the main agent
+- Tool calls show with status indicators (pending/completed)
+- Streaming text updates in real-time
+
+See [frontend/src/app/components/ThinkingBlock](frontend/src/app/components/ThinkingBlock) for the UI implementation.
 
 ## Creating a custom deep agent
 
@@ -282,15 +345,58 @@ as well as custom instructions.
 
 ### Built In Tools
 
-By default, deep agents come with five built-in tools:
+By default, deep agents come with seven built-in tools:
 
 - `write_todos`: Tool for writing todos
 - `write_file`: Tool for writing to a file in the virtual filesystem
 - `read_file`: Tool for reading from a file in the virtual filesystem
 - `ls`: Tool for listing files in the virtual filesystem
 - `edit_file`: Tool for editing a file in the virtual filesystem
+- `request_document_upload`: Tool for requesting document uploads from users
+- `retrieve_context`: Tool for semantic search over uploaded documents (RAG)
 
 If you want to omit some deepagents functionality, use specific middleware components directly!
+
+### RAG (Retrieval Augmented Generation)
+
+`deepagents` includes built-in support for RAG using LangChain's native implementation. This allows agents to semantically search through uploaded documents to find relevant information.
+
+#### How it works:
+
+1. **Document Upload**: Users can upload PDF, DOCX, or PPTX files through the frontend
+2. **Automatic Indexing**: Documents are automatically chunked and indexed using OpenAI embeddings
+3. **Thread Isolation**: Each conversation thread has its own vector store, keeping documents isolated
+4. **Semantic Search**: The `retrieve_context` tool performs similarity search to find relevant chunks
+
+#### Requirements:
+
+- OpenAI API key (for embeddings): Set `OPENAI_API_KEY` environment variable
+- Additional dependencies (automatically installed):
+  - `langchain-openai`
+  - `langchain-text-splitters`
+  - `langchain-community`
+  - `pypdf`, `docx2txt`, `unstructured[pptx]`
+
+#### Usage Example:
+
+```python
+from deepagents import create_deep_agent
+from deepagents.tools import retrieve_context
+
+# Create agent with RAG capability
+agent = create_deep_agent(
+    tools=[retrieve_context],  # Add retrieve_context to your tools
+    instructions="""You can search uploaded documents using the retrieve_context tool.
+    Use this when users ask questions about their uploaded files."""
+)
+
+# The agent can now:
+# 1. Request document uploads using request_document_upload()
+# 2. Search documents using retrieve_context(query="your search query")
+# 3. Answer questions based on document content
+```
+
+See the [research agent example](examples/research/research_agent.py) for a complete implementation with RAG capabilities.
 
 ### Human-in-the-Loop
 
